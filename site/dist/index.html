@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Codexのタスク、サブタスク、プラグイン、スキル、MCP呼び出しを追跡するリアルタイム監視画面。">
+  <meta name="color-scheme" content="dark"><title>CODEX TRACE — 実行経路モニター</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23080d14'/%3E%3Cpath d='M7 8v16h7m11-16v16h-7M11 16h10' stroke='%2354ead3' fill='none' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css"><script src="graph-webgl.js" defer></script><script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Codex Trace"><span class="brandmark">⌘</span><span>CODEX<span class="brand-light"> TRACE</span><small>EXECUTION OBSERVATORY</small></span></a>
+    <div class="toplabel"><span class="slash">//</span> タスクと呼び出し経路</div>
+    <div class="topright"><span id="clock" class="mono"></span><span id="connection" class="status-tag">接続中</span></div>
+  </header>
+  <main>
+    <div class="pagehead"><div><h1>実行経路</h1></div><div class="head-actions"><button id="pause" class="button">Ⅱ 一時停止</button><button id="history-toggle" class="button" aria-expanded="false">呼び出し履歴</button><button id="mode" class="button accent">デモを見る</button></div></div>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section class="metrics" aria-label="監視サマリー">
+      <div class="metric"><span>実行中のタスク</span><div><strong id="m-tasks">—</strong><small id="m-subtasks">サブタスク —</small></div><i class="spark cyan"></i></div>
+      <div class="metric"><span>ツール呼び出し</span><div><strong id="m-calls">—</strong><small>記録された呼び出し</small></div><i class="spark purple"></i></div>
+      <div class="metric"><span>スキル参照</span><div><strong id="m-skills">—</strong><small>読み取り・参照指示</small></div><i class="spark amber"></i></div>
+      <div class="metric"><span>MCP 接続先</span><div><strong id="m-mcp">—</strong><small>呼び出しを確認</small></div><i class="spark green"></i></div>
+    </section>
+    <div class="workspace">
+      <aside class="panel taskpanel"><div class="panelhead"><h2>タスク階層</h2><span id="task-count" class="count">00</span></div><label class="search"><span>⌕</span><input id="search" type="search" placeholder="タスクを検索" aria-label="タスクを検索"></label><div id="task-list" class="task-list"><p class="empty">タスクを読み込んでいます。</p></div><div class="source-note"><span class="tiny-label">DATA SOURCE</span><p>ローカルの Codex 実行記録</p><span id="source-age">接続を待っています</span></div></aside>
+      <section class="panel graphpanel"><div class="panelhead"><div><h2>処理経路</h2><span id="graph-title" class="panel-sub">タスクを選ぶと経路を表示</span></div><div class="graph-actions"><span id="renderer-label" class="tiny-label">WEBGL</span><button id="fit" class="iconbutton" aria-label="グラフ全体を表示" title="グラフ全体を表示">⊡</button></div></div><div class="graphlegend"><span><i class="legend-dot cyan-bg"></i>タスク</span><span><i class="legend-dot purple-bg"></i>プラグイン</span><span><i class="legend-dot amber-bg"></i>スキル</span><span><i class="legend-dot green-bg"></i>MCP</span><span class="edgelegend">━ 実行記録　┄ 記述 / 所属　<span class="cyan">● 呼び出し</span>　<span class="purple">● 応答</span></span></div><div class="graphstage" id="graph-stage"><canvas id="flow-canvas" aria-hidden="true"></canvas><svg id="graph" viewBox="0 0 1280 740" role="group" aria-label="Codexの処理経路グラフ"></svg><span class="stage-label">RUNTIME TOPOLOGY · ドラッグで移動 / ホイールで拡大</span><div class="stage-info"><span id="flow-count">0 CONNECTIONS</span><span class="mono">LOCAL / SQLITE</span></div><div id="route" class="route annotation"><span class="tiny-label">TRACE ANNOTATION</span><p>ノードを選ぶと、呼び出し元・状態・根拠を表示します。</p></div></div></section>
+      <aside class="panel eventpanel"><div class="panelhead"><h2>呼び出し履歴</h2><button id="history-close" class="iconbutton" aria-label="履歴を閉じる">×</button></div><div class="event-tabs" role="group" aria-label="履歴フィルター"><button class="active" data-filter="all">すべて</button><button data-filter="tool">ツール</button><button data-filter="skill">スキル</button><button data-filter="failed">失敗</button></div><div id="event-list" class="event-list"><p class="empty">新しいイベントを待っています。</p></div><div class="event-footer"><span id="event-count">0 EVENTS</span><button id="older" class="textbutton">以前の履歴を読む</button></div></aside>
+    </div>
+    <footer class="footer"><span><i class="legend-dot cyan-bg"></i> CODEX TRACE <span class="muted">/ v1.0</span></span><span id="coverage">記録にあるメタデータのみ表示 · 内部の推論は対象外</span><span class="mono">JST <span id="last-update">—</span></span></footer>
+  </main>
+</body>
+</html>
