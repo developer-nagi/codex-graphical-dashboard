@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../site/dist/graph-model.js';
 
-const {identity,resources,wrapLabel,layout,edgeVisible}=globalThis.TraceGraph;
+const {identity,resources,wrapLabel,layout,edgeVisible,visibleTasks,visibleSelection,visibleGraphEvents}=globalThis.TraceGraph;
 const event=(id,name,extra={})=>({id,name,type:'tool',taskId:'root',evidence:'log',time:'2026-10-04T05:00:00Z',status:'completed',...extra});
 
 test('skills and MCP operations each keep their concrete name',()=>{
@@ -41,4 +41,16 @@ test('routes stay visible when their destination is outside the viewport',()=>{
  assert.equal(edgeVisible({p0:[330,120],p1:[900,120],p2:[1100,240],p3:[1600,240]},view),true);
  assert.equal(edgeVisible({p0:[-300,120],p1:[400,120],p2:[900,240],p3:[1600,240]},view),true);
  assert.equal(edgeVisible({p0:[1600,120],p1:[1900,120],p2:[2100,240],p3:[2400,240]},view),false);
+});
+test('only completed subtasks are hidden, while active grandchildren and history remain intact',()=>{
+ const tasks=[{id:'root',status:'running',parentId:null},{id:'done',status:'completed',parentId:'root'},{id:'active',status:'running',parentId:'done'},{id:'failed',status:'failed',parentId:'root'},{id:'closed-root',status:'completed',parentId:null}];
+ const events=[event('r','functions.exec'),event('d','child-only',{taskId:'done'}),event('g','grandchild-tool',{taskId:'active'}),event('activity','collaboration.completed',{targetTaskId:'done'})];
+ assert.deepEqual(visibleTasks(tasks).map(t=>t.id),['root','active','failed','closed-root']);
+ assert.equal(visibleSelection(tasks,'done'),'root');assert.equal(visibleSelection(tasks,'active'),'active');
+ assert.deepEqual(visibleGraphEvents(tasks,events).map(e=>e.id),['r','g']);
+ assert.equal(tasks.length,5);assert.equal(events.length,4);assert.equal(tasks[1].status,'completed');
+});
+test('selection falls back through hidden ancestors and handles an empty display',()=>{
+ const tasks=[{id:'root',status:'running',parentId:null},{id:'a',status:'completed',parentId:'root'},{id:'b',status:'completed',parentId:'a'}];
+ assert.equal(visibleSelection(tasks,'b'),'root');assert.equal(visibleSelection([], 'b'),undefined);
 });

@@ -83,5 +83,18 @@ globalThis.TraceGraph = (() => {
     const points=[edge.p0,edge.p1,edge.p2,edge.p3];
     return Math.max(...points.map(p=>p[0]))>=view.left && Math.min(...points.map(p=>p[0]))<=view.right && Math.max(...points.map(p=>p[1]))>=view.top && Math.min(...points.map(p=>p[1]))<=view.bottom;
   }
-  return {identity,resources,wrapLabel,layout,edgeVisible};
+  function visibleTasks(tasks) {
+    return tasks.filter(task=>!(task.parentId&&task.status==='completed'));
+  }
+  function visibleSelection(tasks,selected) {
+    const visible=visibleTasks(tasks),ids=new Set(visible.map(t=>t.id)),byId=new Map(tasks.map(t=>[t.id,t]));
+    let current=byId.get(selected);const visited=new Set();
+    while(current&&!ids.has(current.id)&&!visited.has(current.id)){visited.add(current.id);current=byId.get(current.parentId);}
+    return current&&ids.has(current.id)?current.id:visible.find(t=>t.status==='running'&&!t.parentId)?.id||visible.find(t=>!t.parentId)?.id||visible[0]?.id;
+  }
+  function visibleGraphEvents(tasks,events) {
+    const ids=new Set(visibleTasks(tasks).map(t=>t.id));
+    return events.filter(e=>ids.has(e.taskId)&&(!e.targetTaskId||ids.has(e.targetTaskId)));
+  }
+  return {identity,resources,wrapLabel,layout,edgeVisible,visibleTasks,visibleSelection,visibleGraphEvents};
 })();
