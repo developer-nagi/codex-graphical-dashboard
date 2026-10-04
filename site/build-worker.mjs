@@ -1,0 +1,12 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=path.dirname(fileURLToPath(import.meta.url));
+const types={'index.html':'text/html; charset=utf-8','styles.css':'text/css; charset=utf-8','app.js':'application/javascript; charset=utf-8','graph-model.js':'application/javascript; charset=utf-8','graph-webgl.js':'application/javascript; charset=utf-8'};
+const assets={};for(const [name,type]of Object.entries(types))assets[name]={type,body:await fs.readFile(path.join(root,'dist',name),'utf8')};
+const protocol=(await fs.readFile(path.join(root,'sync-protocol.mjs'),'utf8')).replace(/^export /gm,'');
+const worker=(await fs.readFile(path.join(root,'cloud-worker.mjs'),'utf8')).replace(/^import .*from '\.\/sync-protocol\.mjs';\r?\n/,'');
+await fs.mkdir(path.join(root,'dist','server'),{recursive:true});await fs.mkdir(path.join(root,'dist','.openai'),{recursive:true});
+await fs.writeFile(path.join(root,'dist','server','index.js'),protocol+'\nconst TRACE_STATIC_ASSETS='+JSON.stringify(assets)+';\n'+worker);
+await fs.copyFile(path.join(root,'.openai','hosting.json'),path.join(root,'dist','.openai','hosting.json'));
+console.log('Built authenticated remote Worker and dashboard assets.');

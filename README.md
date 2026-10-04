@@ -4,7 +4,7 @@ Codex のタスク・サブタスクとプラグイン、スキル、MCP の呼�
 
 ## 起動
 
-Node.js 22.13以上（`node:sqlite`対応）とPowerShell 7を使用します。追加パッケージは不要です。
+Node.js 22.13以上（`node:sqlite`対応）とPowerShell 7を使用します。ローカル監視の実行に追加パッケージは不要です。外部配信のスキーマ生成では site の開発依存を使用します。
 
 ```powershell
 pwsh -File .\start.ps1
@@ -25,20 +25,33 @@ Codexの内部ブラウザで [ローカル監視画面](http://127.0.0.1:4318/)
 - 完了したサブタスクはタスク一覧と処理経路から非表示にします。選択中に完了した場合は表示可能な親タスクへ戻ります。履歴とSQLiteの記録は保持します。
 - 1回に最大64ログを読み、未読ファイルを順番に巡回します。保留ファイル数は `/api/snapshot` の `source.deferredFiles` で確認できます。64MiBを超える単一行は読み取り対象外となり、`source.oversizeRecords` に計数されます。
 
-保存・配信するのはID、時刻、名前、親子関係、状態、所要時間と根拠の種類です。プロンプト、内部推論、コマンド本文、引数、出力、資格情報は保存・配信しません。データはこのPC内に残ります。
+保存・配信するのはID、時刻、名前、親子関係、状態、所要時間と根拠の種類です。プロンプト、内部推論、コマンド本文、引数、出力、資格情報は保存・配信しません。完全な履歴はこのPCのSQLiteに残り、外部表示用の最新メタデータだけを本人限定のSitesへ同期します。
 
-## Sites
+## 外部からの参照
 
-`site/dist/` は依存パッケージ不要の静的サイトです。Sitesは本人だけがアクセスできるGUIを配信し、同じPCの `127.0.0.1:4318` からデータを読みます。ログをクラウドへ送信する構成ではありません。
+[本人限定のSites](https://codex-trace-nagi.a-iioka137834.chatgpt.site) を別PC・スマートフォンで開き、同じChatGPTアカウントでログインします。閲覧端末のlocalhostは使いません。
 
-ブラウザがローカル接続を制限する場合や別のPCから開いた場合は、GUIに未接続と表示されます。このPCのローカル監視画面を使用してください。Siteの正確なオリジンだけを `.runtime/site-origin.json` の `origin` に設定すると、コレクターがそのオリジンからの読み取りを許可します。
+- このPCからHTTPSで10秒ごとに差分を送信し、SitesのD1に最新状態を保存します。
+- PCが起動し、コレクターが動いている間に更新されます。PCの停止・通信停止・収集停止は更新時刻と状態表示で判別できます。
+- 外部表示は同期された直近100タスク・2,500イベントの範囲です。SQLiteの全履歴ファイルは送信しません。
+- 接続用資格情報は `.runtime/remote-sync.secret` にWindowsのDPAPIで保護します。同じWindowsユーザーだけが復号できます。公開コードやブラウザへ資格情報を渡しません。
+- `/api/health` の `remoteSync` または `.runtime/remote-status.json` で同期状態を確認できます。
+- 再起動は `start.ps1`。同期を止める場合は `.runtime/remote-sync.json` の `enabled` を `false` にしてコレクターを再起動します。
 
-Sitesのソース同期用チェックアウトは `.runtime/publish/` に分離します。SQLite・ログ・認証情報をデプロイやGitHubへ含めません。SiteのIDは `site/.openai/hosting.json` に保持します。
+初回接続は `node scripts/configure-remote.mjs` の非表示の標準入力で、既存Siteのサービス資格情報・同期用キー・Siteのoriginを設定します。資格情報をコマンド引数やGitへ含めません。Siteを替える場合は、そのSiteの秘密環境変数 `TRACE_SYNC_KEY` とローカル設定のキーを一致させます。
+
+## Sites配信
+
+`site/build-worker.mjs` は既存GUIを含むWorkerを生成します。`site/.openai/hosting.json` の既存Site IDを再利用し、D1 bindingは `DB`。`db/schema.ts` と生成済み `drizzle/` が本番スキーマの根拠です。
+
+同期用チェックアウトは `.runtime/publish/` に分離し、SiteのソースとGUIだけをコピーします。SQLite・ログ・資格情報をデプロイやGitHubへ含めません。
+
+[Cloudflare D1の公式API](https://developers.cloudflare.com/d1/worker-api/)に従い、準備済みクエリと条件付き更新でデータを書き込みます。アプリ側でも読み取り・書き込みの認証を確認し、Sitesの本人限定のアクセス制御を維持します。
 
 ## 検証
 
 ```powershell
-node --test tests/telemetry.test.mjs tests/graph-model.test.mjs
+node --test tests/telemetry.test.mjs tests/graph-model.test.mjs tests/remote-sync.test.mjs
 node --check site/dist/app.js
 node --check site/dist/graph-webgl.js
 ```
