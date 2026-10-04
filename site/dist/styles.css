@@ -14,3 +14,5 @@
 .webgl-active .node-box{display:none}.graphstage{touch-action:none;cursor:grab}.graphstage:active,.graph-node:active{cursor:grabbing}.graph-node{cursor:move}.annotation{cursor:auto}.metrics .metric{min-width:0}.metric strong{overflow-wrap:anywhere}.graph-node text{pointer-events:none}
 .event-plugin{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.event-time{flex-shrink:0}.route-details{overflow-wrap:anywhere}.node-hit{pointer-events:all}.graphstage .stage-label{max-width:calc(100% - 36px)}
 @media(max-width:700px){.task-list{height:172px}.task-name{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.task-meta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.graphstage svg,#flow-canvas{min-width:960px}}
+#graph-stage,#graph-stage *{-webkit-user-select:none;user-select:none}
+#graph-stage .annotation,#graph-stage .annotation *{-webkit-user-select:text;user-select:text}
