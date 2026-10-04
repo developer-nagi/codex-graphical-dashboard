@@ -8,7 +8,7 @@ description: このプロジェクトのCodex実行経路GUIを起動・復旧�
 適用条件はこのリポジトリの監視GUIの起動・復旧・収集処理の変更。グローバル設定や他プロジェクトには適用しない。
 
 1. リポジトリルートで `pwsh -File ./start.ps1` を実行する。既存のコレクターを再利用する。ポート使用者が異なる場合は、そのプロセスを終了しない。
-2. `http://127.0.0.1:4318/api/health` の `service`、`pid` と `source` を確認し、`/api/snapshot` の `source.storage` が `sqlite`、`readErrors` が0であること、更新時刻が進むことを確認する。生のログを出力しない。
+2. `http://127.0.0.1:4318/api/health` の `service`、`pid` と `source` を確認し、`/api/snapshot` の `source.storage` が `sqlite`、更新時刻が進むことを確認する。`readErrors` はプロセス起動後の累計なので、複数回の観測で増え続ける場合に未解消の読み取り失敗を調べる。過去の数値を消すためだけに再起動しない。生のログを出力しない。
 3. 内部ブラウザでGUIを開き、LIVE、WebGLまたはフォールバック表示、実際のタスクの親子関係を確認する。デモの成功を実データ接続の成功として報告しない。
 4. 収集やSQLite処理を変えたときは `node --test tests/telemetry.test.mjs` を実行する。表示だけの変更は対応するJavaScriptの構文と文字・操作の収まりを確認する。
 5. 再起動が必要なら `pwsh -File ./stop.ps1`、続いて `pwsh -File ./start.ps1`。PID・開始時刻・コマンドが一致しないプロセスは停止しない。SQLiteを消去しない。
