@@ -37,6 +37,12 @@ export class TelemetryStore {
   position(file){return this.db.prepare('SELECT offset FROM cursors WHERE file=?').get(file)?.offset||0;}
   totals(){return {tasks:this.db.prepare('SELECT count(*) n FROM sessions').get().n,records:this.db.prepare('SELECT count(*) n FROM events').get().n,events:this.db.prepare("SELECT count(*) n FROM events WHERE type='tool' AND evidence!='script'").get().n,skills:this.db.prepare("SELECT count(*) n FROM events WHERE type='skill' AND evidence!='script'").get().n};}
   recentTasks(){return this.db.prepare('SELECT data FROM sessions ORDER BY updated_at DESC LIMIT 100').all().map(r=>JSON.parse(r.data));}
+  updateTitles(titles){
+    const update=this.db.prepare("UPDATE sessions SET data=json_set(data,'$.title',?) WHERE id=? AND json_extract(data,'$.title') IS NOT ?");
+    let changed=0;this.db.exec('BEGIN IMMEDIATE');
+    try{for(const [id,title]of Object.entries(titles))changed+=update.run(title,id,title).changes;this.db.exec('COMMIT');return changed;}
+    catch(e){this.db.exec('ROLLBACK');throw e;}
+  }
   history({taskId=null,before=null,beforeId='',limit=100}={}){
     limit=Math.max(1,Math.min(200,Number(limit)||100));
     const clause=before?' AND (time < ? OR (time = ? AND id < ?))':'';

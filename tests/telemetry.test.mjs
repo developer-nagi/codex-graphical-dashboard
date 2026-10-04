@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
 import {TelemetryCollector} from '../scripts/collector.mjs';
 import {TelemetryStore} from '../scripts/store.mjs';
 
@@ -11,6 +12,10 @@ const row=(type,payload,ordinal=20)=>({timestamp:stamp,type,payload,ordinal});
 const meta=(id='root',parent=null)=>row('session_meta',{id,session_id:parent||id,parent_thread_id:parent,subagent_history_start_ordinal:parent?13:0},0);
 const call=(id,name='exec')=>row('response_item',{type:'custom_tool_call',name,call_id:id,input:'const hidden="PROMPT_SECRET"; await tools.exec_command({cmd:"SECRET_ARGS"});'});
 const output=(id,text='Script completed')=>row('response_item',{type:'custom_tool_call_output',call_id:id,output:text});
+const titleMeta=(id='task-title',time=stamp)=>({...meta(id),timestamp:time});
+const titleComplete=(time=stamp)=>row('event_msg',{type:'task_complete'},21);
+const writeIndex=async(dir,lines)=>fs.writeFile(path.join(dir,'session_index.jsonl'),lines.map(line=>typeof line==='string'?line:JSON.stringify(line)).join('\n')+'\n');
+const writeThreads=async(dir,file,definition,rows)=>{const db=new DatabaseSync(path.join(dir,file));try{db.exec(definition);const insert=db.prepare('INSERT INTO threads VALUES(?,?)');for(const [id,name] of rows)insert.run(id,name);}finally{db.close();}};
 
 test('subagent keeps its own identity and ignores inherited records',()=>{
  const c=new TelemetryCollector();c.consume(meta('child','root'),'child');c.consume(meta('root'),'child');c.consume(call('old'), 'child');c.consume(row('response_item',{type:'function_call',namespace:'clock',name:'sleep',call_id:'inherited'},5),'child');
@@ -53,5 +58,66 @@ test('more than 64 files rotate through ingestion and retain the display cache',
  try{for(let i=0;i<101;i++){const file=path.join(sessionDir,`rollout-${i}.jsonl`);await fs.writeFile(file,[meta('task-'+i),call('call-'+i),output('call-'+i)].map(x=>JSON.stringify(x)).join('\n')+'\n');}
   await c.scan();assert.equal(store.totals().tasks,64);await c.scan();assert.equal(store.totals().tasks,101);assert.equal(store.totals().events,101);await c.scan();assert.ok(c.snapshot().events.length>=101);
   const file=path.join(sessionDir,'rollout-0.jsonl');await fs.appendFile(file,JSON.stringify(call('resumed-101'))+'\n');const resumed=new TelemetryCollector({codexHome:dir,store});await resumed.scan();assert.ok(store.findCall('task-0','resumed-101'));assert.equal(store.totals().events,102);
+ }finally{store.close();const target=path.resolve(dir);assert.equal(path.dirname(target),path.resolve(os.tmpdir()));assert.ok(path.basename(target).startsWith('codex-trace-test-'));await fs.rm(target,{recursive:true,force:true});}
+});
+
+test('task titles prefer the latest state DB name and fall back to session index safely',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'codex-trace-test-'));
+ try{
+  await fs.writeFile(path.join(dir,'.codex-global-state.json'),JSON.stringify({'thread-titles':{titles:{'task-db':'Global title','task-index':'Global fallback'}},'thread-descriptions':{'task-desc':{description:'Conversation description'}}}));
+  await writeIndex(dir,[
+   {id:'task-db',thread_name:'Index title',updated_at:'2026-10-04T04:00:00.000Z'},
+   {id:'task-index',thread_name:'Older index title',updated_at:'2026-10-04T04:00:00.000Z'},
+   '{broken json',
+   {id:'task-index',thread_name:null,updated_at:'2026-10-04T06:00:00.000Z'},
+   {id:'task-index',thread_name:'Latest index title',updated_at:'2026-10-04T05:00:00.000Z'},
+   {id:'task-index',thread_name:'Partial newer line',updated_at:'not-a-date'}
+  ]);
+  await writeThreads(dir,'state_2.sqlite','CREATE TABLE threads(id TEXT PRIMARY KEY,name TEXT NOT NULL)',[
+   ['task-db','Database title']
+  ]);
+  const beforeDb=await fs.readFile(path.join(dir,'state_2.sqlite'));
+  const c=new TelemetryCollector({codexHome:dir});
+  await c.readTitles();
+  assert.equal(c.titles['task-db'],'Database title');
+  assert.equal(c.titles['task-index'],'Latest index title');
+  assert.equal(c.titles['task-desc'],undefined);
+  assert.equal(c.titles['task-db'].includes('Global'),false);
+  assert.equal(c.titles['task-index'].includes('Global'),false);
+  assert.deepEqual(await fs.readFile(path.join(dir,'state_2.sqlite')),beforeDb);
+
+  await writeIndex(dir,[
+   {id:'task-db',thread_name:'Stale index title',updated_at:'2026-10-04T07:00:00.000Z'},
+   {id:'task-index',thread_name:'Latest index title',updated_at:'2026-10-04T05:00:00.000Z'}
+  ]);
+  await fs.writeFile(path.join(dir,'state_2.sqlite'),'not a sqlite database');
+  await c.readTitles();
+  assert.equal(c.titles['task-db'],'Database title');
+
+  await fs.rm(path.join(dir,'state_2.sqlite'),{force:true});
+  const oldDb=new DatabaseSync(path.join(dir,'state_3.sqlite'));
+  try{oldDb.exec('CREATE TABLE threads(id TEXT PRIMARY KEY,title TEXT,first_user_message TEXT,globaldescription TEXT)');oldDb.prepare('INSERT INTO threads VALUES(?,?,?,?)').run('task-index','Conversation title','PROMPT_SECRET','DESCRIPTION_SECRET');}
+  finally{oldDb.close();}
+  const fallback=new TelemetryCollector({codexHome:dir});
+  await fallback.readTitles();
+  assert.equal(fallback.titles['task-index'],'Latest index title');
+  assert.equal(fallback.titles['task-index'].includes('Conversation'),false);
+ }finally{const target=path.resolve(dir);assert.equal(path.dirname(target),path.resolve(os.tmpdir()));assert.ok(path.basename(target).startsWith('codex-trace-test-'));await fs.rm(target,{recursive:true,force:true});}
+});
+
+test('renamed task titles update SQLite across scans and restart without changing task state',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'codex-trace-test-'));const logDir=path.join(dir,'sessions','2026','10','04');await fs.mkdir(logDir,{recursive:true});const file=path.join(logDir,'rollout-title.jsonl');const dbPath=path.join(dir,'telemetry.db');const store=new TelemetryStore(dbPath);
+ try{
+  await fs.writeFile(file,[titleMeta(),titleComplete()].map(x=>JSON.stringify(x)).join('\n')+'\n');
+  await writeIndex(dir,[{id:'task-title',thread_name:'First task name',updated_at:'2026-10-04T05:00:00.000Z'}]);
+  const first=new TelemetryCollector({codexHome:dir,store});await first.scan();
+  const savedFirst=store.recentTasks().find(task=>task.id==='task-title');
+  assert.equal(savedFirst.title,'First task name');assert.equal(savedFirst.status,'completed');assert.equal(savedFirst.updatedAt,stamp);
+  await writeIndex(dir,[{id:'task-title',thread_name:'Renamed task',updated_at:'2026-10-04T06:00:00.000Z'}]);
+  await first.scan();
+  const savedSecond=store.recentTasks().find(task=>task.id==='task-title');
+  assert.equal(savedSecond.title,'Renamed task');assert.equal(savedSecond.status,'completed');assert.equal(savedSecond.updatedAt,stamp);
+  const restarted=new TelemetryCollector({codexHome:dir,store});
+  assert.equal(restarted.tasks.get(file).title,'Renamed task');assert.equal(restarted.tasks.get(file).status,'completed');assert.equal(restarted.tasks.get(file).updatedAt,stamp);
  }finally{store.close();const target=path.resolve(dir);assert.equal(path.dirname(target),path.resolve(os.tmpdir()));assert.ok(path.basename(target).startsWith('codex-trace-test-'));await fs.rm(target,{recursive:true,force:true});}
 });

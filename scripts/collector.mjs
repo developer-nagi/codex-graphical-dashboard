@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
 
 const safe = (s, max=180) => typeof s==='string' ? s.replace(/[\x00-\x1f]/g,' ').slice(0,max) : null;
 const hash = s => createHash('sha256').update(s).digest('hex').slice(0,22);
@@ -16,7 +17,7 @@ export function provenance(name){
 export class TelemetryCollector {
   constructor({codexHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex'),days=2,maxFiles=64,store=null}={}){
     this.codexHome=codexHome;this.days=days;this.maxFiles=maxFiles;this.files=new Map();this.tasks=new Map();this.events=new Map();this.pending=new Map();this.revision=0;this.errors=0;this.updatedAt=null;this.titles={};this.scanCount=0;
-    this.store=store;this.dirtyEvents=new Set();this.cells=new Map();this.waitTargets=new Map();this.inflight=new Map();this.oversizeRecords=0;this.lastServed=new Map();
+    this.store=store;this.dirtyEvents=new Set();this.cells=new Map();this.waitTargets=new Map();this.inflight=new Map();this.oversizeRecords=0;this.lastServed=new Map();this.titleRanks={};
     if(store){const saved=store.restore();this.files=new Map(saved.cursors);this.tasks=new Map(saved.tasks);this.cells=new Map(saved.links);for(const e of saved.events){this.events.set(e.id,e);if(e.status==='running'&&e.callId){this.pending.set(e.taskId+':'+e.callId,e.id);this.inflight.set(e.id,e);}}}
   }
   record(event){this.events.set(event.id,event);this.dirtyEvents.add(event.id);if(event.status==='running'&&event.callId)this.inflight.set(event.id,event);else this.inflight.delete(event.id);}
@@ -109,13 +110,31 @@ export class TelemetryCollector {
     }
   }
   async readTitles(){
+    const titles={},ranks={};
+    const put=(id,title,rank)=>{const value=safe(title,600)?.trim();if(typeof id==='string'&&value){titles[id]=value;ranks[id]=rank;}};
     try{const g=JSON.parse(await fs.readFile(path.join(this.codexHome,'.codex-global-state.json'),'utf8'));
-      const atoms=g['electron-persisted-atom-state']||{};
       const source=g['thread-titles']?.titles||g['thread-titles-v1']?.titles||g['thread-titles-v1']||{};
-      for(const [id,t]of Object.entries(source))if(typeof t==='string')this.titles[id]=safe(t,100);
-      for(const [id,t]of Object.entries(atoms['thread-descriptions-v1']||g['thread-descriptions-v1']||{}))if(!this.titles[id])this.titles[id]=safe(typeof t==='string'?t:t?.title,100);
-      for(const task of this.tasks.values())if(this.titles[task.id])task.title=this.titles[task.id];
+      for(const [id,t]of Object.entries(source))put(id,t,1);
     }catch{}
+    // Descriptions and threads.title contain conversation text, not the displayed name.
+    try{const latest=new Map();for(const line of (await fs.readFile(path.join(this.codexHome,'session_index.jsonl'),'utf8')).split('\n')){
+      let row;try{row=JSON.parse(line);}catch{continue;}
+      if(typeof row?.id!=='string'||!safe(row.thread_name,600)?.trim())continue;
+      const prior=latest.get(row.id),time=Date.parse(row.updated_at)||0;
+      if(!prior||time>=prior.time)latest.set(row.id,{title:row.thread_name,time});
+    }for(const [id,row]of latest)put(id,row.title,2);}catch{}
+    try{const databases=(await fs.readdir(this.codexHome)).filter(f=>/^state_\d+\.sqlite$/.test(f)).sort((a,b)=>Number(b.match(/\d+/)[0])-Number(a.match(/\d+/)[0]));
+      for(const file of databases){let db;try{
+        db=new DatabaseSync(path.join(this.codexHome,file),{readOnly:true});
+        for(const row of db.prepare("SELECT id,name FROM threads WHERE name IS NOT NULL AND trim(name) != ''").all())put(row.id,row.name,3);
+        break;
+      }catch{}finally{db?.close();}}
+    }catch{}
+    // Keep a known authoritative name when a lower-priority source is stale.
+    for(const [id,title]of Object.entries(titles))if(ranks[id]>=(this.titleRanks[id]||0)){this.titles[id]=title;this.titleRanks[id]=ranks[id];}
+    let changed=this.store?.updateTitles(this.titles)||0;
+    for(const task of this.tasks.values())if(this.titles[task.id]&&task.title!==this.titles[task.id]){task.title=this.titles[task.id];changed++;}
+    if(changed)this.revision++;
   }
   async discover(){
     const candidates=[];
@@ -143,7 +162,7 @@ export class TelemetryCollector {
   }
   async scan(){
     if(this.scanning)return;this.scanning=true;
-    try{if(this.scanCount++%15===0)await this.readTitles();const files=await this.discover();for(const info of files){try{await this.readFile(info);}catch{this.errors++;}}
+    try{this.scanCount++;await this.readTitles();const files=await this.discover();for(const info of files){try{await this.readFile(info);}catch{this.errors++;}}
       const retained=new Set(files.map(f=>f.file));for(const file of this.files.keys())if(!retained.has(file)){this.files.delete(file);this.tasks.delete(file);}
       if(this.store){this.store.save(this.tasks,[...this.dirtyEvents].map(id=>this.events.get(id)).filter(Boolean),this.files,this.cells);this.dirtyEvents.clear();}
       if(this.events.size>6000){const ordered=[...this.events.values()].sort((a,b)=>Date.parse(a.time)-Date.parse(b.time));for(const event of ordered.slice(0,ordered.length-6000))this.events.delete(event.id);}
