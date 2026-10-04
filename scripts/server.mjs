@@ -28,7 +28,7 @@ const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/history'){res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(store.history({taskId:url.searchParams.get('taskId'),before:url.searchParams.get('before'),beforeId:url.searchParams.get('beforeId')||'',limit:url.searchParams.get('limit')})));return;}
     if(url.pathname==='/api/health'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({service:'codex-trace',pid:process.pid,startedAt,source:collector.snapshot().source}));return;}
     const file=url.pathname==='/'?'index.html':url.pathname.slice(1);
-    if(!['index.html','styles.css','app.js','graph-webgl.js'].includes(file)){res.writeHead(404);res.end('Not found');return;}
+    if(!['index.html','styles.css','app.js','graph-webgl.js','graph-model.js'].includes(file)){res.writeHead(404);res.end('Not found');return;}
     const content=await fs.readFile(path.join(root,'site','dist',file));res.setHeader('Content-Type',types[path.extname(file)]);res.end(content);
   }catch{res.writeHead(500);res.end('Read failed');}
 });
